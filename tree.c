@@ -8,13 +8,16 @@
 //
 // Example single entry (conceptual):
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
-
+#include "index.h"
 #include "tree.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+// Forward declarations
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+int index_load(Index *index);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -149,7 +152,7 @@ static int write_tree_level(IndexEntry **entries, int count,
             te->name[sizeof(te->name) - 1] = '\0';
 
             // Copy the blob hash that was stored at pes-add time
-            memcpy(te->hash.hash, entries[i]->id.hash, HASH_SIZE);
+            memcpy(te->hash.hash, entries[i]->hash.hash, HASH_SIZE);
 
             tree.count++;
             i++;

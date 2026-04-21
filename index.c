@@ -161,7 +161,7 @@ int index_load(Index *index) {
         e->path[sizeof(e->path) - 1] = '\0';
 
         // Convert 64-char hex string → ObjectID
-        if (hex_to_hash(hex, &e->id) != 0) {
+        if (hex_to_hash(hex, &e->hash) != 0) {
             fclose(f);
             return -1;
         }
@@ -201,7 +201,7 @@ int index_save(const Index *index) {
         const IndexEntry *e = &sorted.entries[i];
 
         char hex[HASH_HEX_SIZE + 1];
-        hash_to_hex(&e->id, hex);
+        hash_to_hex(&e->hash, hex);
 
         fprintf(f, "%o %s %lu %lu %s\n",
                 e->mode,
@@ -298,10 +298,10 @@ int index_add(Index *index, const char *path) {
     IndexEntry *existing = index_find(index, path);
     if (existing) {
         // Update in place
-        existing->id        = blob_id;
+        existing->hash        = blob_id;
         existing->mode      = mode;
         existing->mtime_sec = (uint64_t)st.st_mtime;
-        existing->size      = (uint64_t)st.st_size;
+        existing->size      = (uint32_t)st.st_size;
     } else {
         // Add new entry
         if (index->count >= MAX_INDEX_ENTRIES) {
@@ -309,10 +309,10 @@ int index_add(Index *index, const char *path) {
             return -1;
         }
         IndexEntry *e = &index->entries[index->count];
-        e->id        = blob_id;
+        e->hash        = blob_id;
         e->mode      = mode;
         e->mtime_sec = (uint64_t)st.st_mtime;
-        e->size      = (uint64_t)st.st_size;
+        e->size      = (uint32_t)st.st_size;
         strncpy(e->path, path, sizeof(e->path) - 1);
         e->path[sizeof(e->path) - 1] = '\0';
         index->count++;
