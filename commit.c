@@ -132,13 +132,13 @@ int head_read(ObjectID *id_out) {
     char line[512];
     if (!fgets(line, sizeof(line), f)) { fclose(f); return -1; }
     fclose(f);
-    line[strcspn(line, "\r\n")] = '\0'; // strip newline
+    line[strcspn(line, "\r\n")] = '\0';
 
     char ref_path[512];
     if (strncmp(line, "ref: ", 5) == 0) {
         snprintf(ref_path, sizeof(ref_path), "%s/%s", PES_DIR, line + 5);
         f = fopen(ref_path, "r");
-        if (!f) return -1; // Branch exists but has no commits yet
+        if (!f) return -1;
         if (!fgets(line, sizeof(line), f)) { fclose(f); return -1; }
         fclose(f);
         line[strcspn(line, "\r\n")] = '\0';
@@ -159,43 +159,89 @@ int head_update(const ObjectID *new_commit) {
     if (strncmp(line, "ref: ", 5) == 0) {
         snprintf(target_path, sizeof(target_path), "%s/%s", PES_DIR, line + 5);
     } else {
-        snprintf(target_path, sizeof(target_path), "%s", HEAD_FILE); // Detached HEAD
+        snprintf(target_path, sizeof(target_path), "%s", HEAD_FILE);
     }
 
     char tmp_path[528];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
-    
+
     f = fopen(tmp_path, "w");
     if (!f) return -1;
-    
+
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(new_commit, hex);
     fprintf(f, "%s\n", hex);
-    
+
     fflush(f);
     fsync(fileno(f));
     fclose(f);
-    
+
     return rename(tmp_path, target_path);
 }
 
-// ─── TODO: Implement these ───────────────────────────────────────────────────
+// ─── IMPLEMENTATION ───────────────────────────────────────────────────────────
 
 // Create a new commit from the current staging area.
 //
-// HINTS - Useful functions to call:
-//   - tree_from_index   : writes the directory tree and gets the root hash
-//   - head_read         : gets the parent commit hash (if any)
-//   - pes_author        : retrieves the author name string (from pes.h)
-//   - time(NULL)        : gets the current unix timestamp
-//   - commit_serialize  : converts the filled Commit struct to a text buffer
-//   - object_write      : saves the serialized text as OBJ_COMMIT
-//   - head_update       : moves the branch pointer to your new commit
+// Steps:
+//   1. Build a tree from the index  → root tree hash
+//   2. Read current HEAD            → parent commit hash (may not exist)
+//   3. Fill a Commit struct         → author, timestamp, message, tree, parent
+//   4. Serialize the Commit struct  → raw text buffer
+//   5. Write as OBJ_COMMIT          → new commit hash
+//   6. Update HEAD atomically       → move branch pointer to new commit
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+    Commit c;
+    memset(&c, 0, sizeof(c));
+
+    // ── Step 1: Build tree from the staged index ──────────────────────────
+    if (tree_from_index(&c.tree) != 0) {
+        fprintf(stderr, "error: failed to build tree from index\n");
+        return -1;
+    }
+
+    // ── Step 2: Read parent commit from HEAD (optional) ───────────────────
+    ObjectID parent_id;
+    if (head_read(&parent_id) == 0) {
+        // HEAD points to a previous commit — this is not the first commit
+        c.has_parent = 1;
+        c.parent     = parent_id;
+    } else {
+        // No HEAD yet — this is the very first commit, no parent
+        c.has_parent = 0;
+    }
+
+    // ── Step 3: Fill in author, timestamp, and message ────────────────────
+    const char *author = pes_author(); // reads PES_AUTHOR env var or default
+    snprintf(c.author, sizeof(c.author), "%s", author);
+
+    c.timestamp = (uint64_t)time(NULL);
+
+    snprintf(c.message, sizeof(c.message), "%s", message);
+
+    // ── Step 4: Serialize the commit struct to text ───────────────────────
+    void   *raw_data = NULL;
+    size_t  raw_len  = 0;
+    if (commit_serialize(&c, &raw_data, &raw_len) != 0) {
+        fprintf(stderr, "error: failed to serialize commit\n");
+        return -1;
+    }
+
+    // ── Step 5: Write as a commit object → get commit hash ────────────────
+    if (object_write(OBJ_COMMIT, raw_data, raw_len, commit_id_out) != 0) {
+        free(raw_data);
+        fprintf(stderr, "error: failed to write commit object\n");
+        return -1;
+    }
+    free(raw_data);
+
+    // ── Step 6: Atomically update HEAD / branch ref ───────────────────────
+    if (head_update(commit_id_out) != 0) {
+        fprintf(stderr, "error: failed to update HEAD\n");
+        return -1;
+    }
+
+    return 0;
 }
